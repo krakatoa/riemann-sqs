@@ -13,24 +13,27 @@ class Riemann::Tools::AWS
   opt :access_key, "AWS access key", :type => String
   opt :secret_key, "Secret access key", :type => String
   opt :region, "AWS region", :type => String, :default => 'us-east-1'
-  opt :queue, "SQS Queue name", :type => String
+  opt :queue, "SQS Queue name", :type => String, :multi => true
+
   def initialize
     @sqs = Fog::AWS::SQS.new(:aws_access_key_id => opts[:access_key],
                              :aws_secret_access_key => opts[:secret_key],
                              :region => opts[:region])
-    response = @sqs.list_queues({'QueueNamePrefix' => opts[:queue]})
-    @queue_url = response[:body]['QueueUrls'].first
+    response = @sqs.list_queues
+    @queues_info = opts[:queue].inject({}) {|h, name| h[name] = response[:body]['QueueUrls'].select {|url| url.include? name }.first; h }
   end
 
   def tick
-    response = @sqs.get_queue_attributes(@queue_url, 'All')
-    ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'].each do |attr|
-      msg = {
-        metric: response[:body]['Attributes'][attr],
-        service: "#{opts[:queue]} #{attr}",
-        state: 'ok'
-      }
-      report msg
+    @queues_info.each_pair do |queue, queue_url|
+      response = @sqs.get_queue_attributes(queue_url, 'All')
+      ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'].each do |attr|
+        msg = {
+          metric: response[:body]['Attributes'][attr],
+          service: "#{queue} #{attr}",
+          state: 'ok'
+        }
+        report msg
+      end
     end
   end
 end
